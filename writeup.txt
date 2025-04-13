@@ -1,0 +1,252 @@
+DATAFRAME PROJECT WRITEUP
+
+NOTES:
+-------
+Runtime:
+  - With cargo run: ~5-10 seconds (after initial compilation/dependency download)
+  - With cargo run --release: ~1-3 seconds (after initial compilation)
+
+AI Use:
+  - The AI assistant was used extensively to generate the entire codebase (src/lib.rs, 
+    src/main.rs, Cargo.toml, sample CSV files, README.md) based on the detailed specifications 
+    provided in the initial prompt. It also assisted with refining implementations 
+    (like ensuring sub_columns used column_op) and adding documentation comments.
+
+CODE EXPLANATION:
+-----------------
+
+CORE DATA STRUCTURES (src/lib.rs):
+----------------------------------
+
+1. Value Enum:
+   - Purpose: Represents the possible data types that can be stored in a DataFrame cell.
+   - Variants: String(String), F64(f64), I64(i64), Bool(bool).
+   - Ensures: Type safety within columns.
+
+2. ValueType Enum:
+   - Purpose: Represents the type of a column, used for validation and type checking.
+   - Variants: String, F64, I64, Bool.
+
+3. Column Struct:
+   - Purpose: Stores the data for a single column.
+   - Fields:
+     * data: Vec<Value>: Holds the actual data values for the column.
+     * data_type: Option<ValueType>: Stores the type of the column for quick checking.
+   - Ensures: All data within a Column instance is of the same Value variant.
+
+4. DataFrame Struct:
+   - Purpose: Represents the main data table structure.
+   - Fields:
+     * columns: HashMap<String, Column>: Stores the columns, mapped by their string labels.
+     * labels: Vec<String>: Maintains the original order of the columns.
+   - Supports: Arbitrary number of rows and columns.
+
+ERROR HANDLING (src/lib.rs):
+---------------------------
+
+1. Error Enum:
+   - Purpose: Defines custom error types specific to DataFrame operations.
+   - Variants: Io, Csv, ColumnNotFound, TypeMismatch, DimensionMismatch, InvalidOperation.
+   - Provides: More informative error messages than generic panic! or standard library errors alone.
+
+CONSTRUCTOR FUNCTION (src/lib.rs):
+---------------------------------
+
+1. new_dataframe Function:
+   - Purpose: Auxiliary "constructor" function to create DataFrame instances safely.
+   - Input:
+     * labels: Vec<String>: Ordered list of column names.
+     * data: HashMap<String, Vec<Value>>: Map where keys are labels and values are vectors 
+       containing the column data.
+   - Steps/Process:
+     * Validates that labels and data correspond and are not empty.
+     * Checks that all provided columns have the same number of rows.
+     * Infers the ValueType for each column from the first element.
+     * Validates that all values within a given column vector match the inferred type.
+     * Creates Column structs for each validated data vector.
+     * Populates the DataFrame's columns HashMap and labels Vec.
+   - Output: Result<DataFrame, Error> (either the created DataFrame or an error).
+
+DATAFRAME METHODS (src/lib.rs):
+------------------------------
+
+1. read_csv Method:
+   - Purpose: Reads data from a CSV file into a DataFrame.
+   - Input:
+     * path: Path to the CSV file.
+     * col_types: &HashMap<String, ValueType>: Expected data type for each column.
+   - Steps/Process:
+     * Opens and reads the CSV file line by line.
+     * Parses the first line as the header (column labels).
+     * Validates that the provided col_types match the header labels.
+     * Iterates through the remaining data rows.
+     * Parses each value string into the expected Value type based on col_types.
+     * Collects parsed data into a HashMap<String, Vec<Value>>.
+     * Calls new_dataframe to construct the final DataFrame.
+   - Output: Result<DataFrame, Error>.
+
+2. add_column Method:
+   - Purpose: Adds a new column to the DataFrame.
+   - Input:
+     * label: String: Name for the new column.
+     * data: Vec<Value>: Data for the new column.
+   - Steps/Process:
+     * Checks if a column with the same label already exists.
+     * Validates that the number of rows in data matches the DataFrame's current number of rows.
+     * Determines and validates the type consistency of the input data vector.
+     * Creates a new Column struct.
+     * Clones the existing DataFrame's columns and labels.
+     * Inserts the new column and label into the cloned structures.
+     * Returns a new DataFrame instance containing the added column.
+   - Output: Result<DataFrame, Error>.
+
+3. merge_frame Method:
+   - Purpose: Appends the rows of another DataFrame to the current one.
+   - Input: other: &DataFrame: The DataFrame whose rows will be appended.
+   - Steps/Process:
+     * Checks if both DataFrames have the same number of columns.
+     * Verifies that the column labels and their corresponding types match exactly.
+     * Clones the columns of the first DataFrame.
+     * Extends the data vector within each cloned Column with the data from the other DataFrame.
+     * Returns a new DataFrame instance with the combined rows.
+   - Output: Result<DataFrame, Error>.
+
+4. restrict_columns Method:
+   - Purpose: Creates a new DataFrame containing only a specified subset of columns.
+   - Input: keep_labels: &[String]: A slice of column labels to keep.
+   - Steps/Process:
+     * Creates a new empty HashMap for columns and Vec for labels.
+     * Iterates through keep_labels.
+     * For each label, attempts to find the corresponding column in the original DataFrame.
+     * If found, clones the column and inserts it into the new structures.
+     * Returns a new DataFrame containing only the specified columns.
+   - Output: Result<DataFrame, Error>.
+
+5. filter Method:
+   - Purpose: Creates a new DataFrame containing only rows that satisfy a given condition.
+   - Input:
+     * column_label: &str: The label of the column to apply the filter condition to.
+     * predicate: F: A closure that takes a reference to a Value and returns true/false.
+   - Steps/Process:
+     * Finds the target column by column_label.
+     * Iterates through the values in the target column, applying the predicate.
+     * Collects the indices of rows for which the predicate returns true.
+     * Creates a new empty data structure and copies the filtered rows.
+     * Calls new_dataframe to construct the filtered DataFrame.
+   - Output: Result<DataFrame, Error>.
+
+6. column_op Method:
+   - Purpose: Applies an arbitrary operation to one or more columns.
+   - Input:
+     * column_labels: &[String]: Labels of the columns to operate on.
+     * operation: F: A closure that takes a slice of Column references and returns a result.
+   - Steps/Process:
+     * Collects references to the specified columns.
+     * Passes these references to the provided operation closure.
+     * Returns whatever the operation returns.
+   - Output: Result<T, Error> where T is the type returned by the operation.
+
+7. median Method:
+   - Purpose: Calculates the median value of a numeric column.
+   - Input: column_label: &str: The label of the column to calculate the median for.
+   - Steps/Process:
+     * Uses column_op to access the specified column.
+     * Checks that the column contains numeric values (F64 or I64).
+     * Extracts the numeric values into a vector.
+     * Sorts the vector and calculates the median using the standard formula.
+     * Returns the median value as a Value::F64.
+   - Output: Result<Value, Error>.
+
+8. sub_columns Method:
+   - Purpose: Performs row-wise subtraction between two numeric columns.
+   - Input:
+     * label1: &str: The label of the first column (minuend).
+     * label2: &str: The label of the second column (subtrahend).
+   - Steps/Process:
+     * Uses column_op to access both columns.
+     * Checks that both columns contain numeric values and have the same length.
+     * Iterates through corresponding pairs of values, performing subtraction.
+     * Returns a vector of the resulting differences.
+   - Output: Result<Vec<Value>, Error>.
+
+DISPLAY IMPLEMENTATION (src/lib.rs):
+----------------------------------
+
+1. Display Implementation for DataFrame:
+   - Purpose: Provides a well-formatted string representation of the DataFrame.
+   - Steps/Process:
+     * Calculates the maximum width needed for each column.
+     * Prints the header row with column labels.
+     * Prints a separator line.
+     * Prints each data row with proper alignment.
+   - Output: Formatted string representation suitable for console display.
+
+MAIN.RS DEMONSTRATION:
+---------------------
+
+The src/main.rs file demonstrates all the functionalities specified in the requirements:
+
+1. Creates a DataFrame from data.csv using read_csv.
+2. Adds a new hall_of_fame column using add_column.
+3. Creates a second DataFrame from data2.csv.
+4. Adds the hall_of_fame column to the second DataFrame.
+5. Merges the two DataFrames using merge_frame.
+6. Creates a restricted DataFrame with only Name and TotalPoints columns using restrict_columns.
+7. Filters the DataFrame to show only players with PPG > 25.0 using filter.
+8. Calculates the median PPG using median.
+9. Performs row-wise subtraction of TotalPoints and YearBorn using sub_columns.
+10. Demonstrates a custom operation using column_op to calculate the sum of TotalPoints.
+
+SAMPLE OUTPUT (SELECTED PORTIONS):
+---------------------------------
+
+Initial DataFrame (df1):
+Name     Number    PPG  YearBorn  TotalPoints  LikesPizza
+-------- ------  -----  --------  -----------  ----------
+Kareem       33   24.6      1947        48387  true      
+Karl         32   25.1      1963        46928  false     
+LeBron       23     27      1984        46381  false     
+Kobe         24     25      1978        43643  true      
+Michael      23   30.1      1963        42292  false     
+Shaq         34   23.7      1972        28596  true      
+Wilt         13   30.1      1936        31419  false     
+Dirk         41   20.7      1978        31560  true      
+Tim          21     19      1976        26496  false     
+Hakeem       34   21.8      1963        26946  true      
+
+Filtered DataFrame (PPG > 25.0):
+Name     Number    PPG  YearBorn  TotalPoints  LikesPizza  hall_of_fame
+-------- ------  -----  --------  -----------  ----------  ------------
+Karl         32   25.1      1963        46928  false       true        
+LeBron       23     27      1984        46381  false       true        
+Michael      23   30.1      1963        42292  false       true        
+Wilt         13   30.1      1936        31419  false       true        
+Oscar         1   25.7      1938        26710  true        true        
+Jerry        44     27      1938        25192  false       true        
+
+Median PPG: 24.8
+
+Result of TotalPoints - YearBorn:
+[ 46440, 44965, 44397, 41665, 40329, 26624, 29483, 29582, 24520, 24983, 15748, 19835, 12588, 24772, 23254, 18825 ]
+
+CONCLUSION:
+-----------
+
+This implementation of a DataFrame structure in Rust provides all the required functionality:
+- Storing data in typed columns with string labels
+- Reading from CSV files
+- Adding columns
+- Merging DataFrames
+- Restricting columns
+- Filtering rows
+- Applying arbitrary operations
+- Computing medians
+- Performing column subtraction
+
+The implementation follows good Rust practices:
+- Using enums for type safety
+- Providing clear error messages
+- Properly handling potential runtime errors
+- Using generic functions and closures for flexibility
+- Maintaining immutability by returning new DataFrame instances
+- Providing clear documentation 
