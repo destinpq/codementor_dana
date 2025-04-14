@@ -1,3 +1,8 @@
+/// A simple DataFrame implementation for data analysis
+/// 
+/// This module provides a DataFrame structure that can store and manipulate
+/// tabular data with different column types. It supports various operations
+/// like filtering, merging, and column operations.
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
@@ -6,13 +11,20 @@ use std::path::Path;
 
 // --- Error Handling ---
 
+/// Custom error types for DataFrame operations
 #[derive(Debug)]
 pub enum Error {
+    /// I/O-related errors
     Io(std::io::Error),
+    /// CSV parsing errors
     Csv(csv::Error),
+    /// When a specified column cannot be found
     ColumnNotFound(String),
+    /// When there's a type mismatch in operations
     TypeMismatch(String),
+    /// When dimensions don't match for operations
     DimensionMismatch(String),
+    /// General invalid operations
     InvalidOperation(String),
 }
 
@@ -65,21 +77,31 @@ impl fmt::Display for Value {
 }
 
 #[derive(Debug, Clone)]
+/// Represents a column in a DataFrame
+///
+/// Stores a vector of values of the same type
 pub struct Column {
-    data: Vec<Value>,
-    // We store the type here for faster checking, although it can be inferred from data[0] if data is not empty
+    /// The data values stored in the column
+    pub data: Vec<Value>,
+    /// The type of data stored in the column
     data_type: Option<ValueType>,
 }
 
+/// Represents the type of values in a column
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueType {
+    /// String type
     String,
+    /// 64-bit floating point type
     F64,
+    /// 64-bit integer type
     I64,
+    /// Boolean type
     Bool,
 }
 
 impl Column {
+    /// Creates a new Column with the specified data type
     fn new(data_type: ValueType) -> Self {
         Column { data: Vec::new(), data_type: Some(data_type) }
     }
@@ -113,13 +135,28 @@ impl Column {
     }
 }
 
+/// DataFrame structure to store and manipulate tabular data
+///
+/// The data is stored in a column-major format, where each column is a vector
+/// of values of the same type. Each column has an associated label.
 #[derive(Debug, Clone)]
 pub struct DataFrame {
+    /// Maps column labels to Column instances
     columns: HashMap<String, Column>,
+    /// Maintains the original order of columns
     labels: Vec<String>, // Keep track of column order
 }
 
 // --- Constructor ---
+/// Creates a new DataFrame from labels and data
+///
+/// # Arguments
+/// * `labels` - Vector of column labels
+/// * `data` - HashMap mapping column labels to data vectors
+///
+/// # Returns
+/// * `Ok(DataFrame)` if successful
+/// * `Err` if there's a dimension mismatch or type inconsistency
 pub fn new_dataframe(labels: Vec<String>, data: HashMap<String, Vec<Value>>) -> Result<DataFrame, Error> {
      if labels.is_empty() || data.is_empty() || labels.len() != data.len() {
          return Err(Error::DimensionMismatch("Labels and data must correspond and not be empty".to_string()));
@@ -177,15 +214,26 @@ pub fn new_dataframe(labels: Vec<String>, data: HashMap<String, Vec<Value>>) -> 
 
 // --- DataFrame Methods ---
 impl DataFrame {
+    /// Returns the number of rows in the DataFrame
     pub fn num_rows(&self) -> usize {
         // Assumes dataframe is valid (all columns have same length)
         self.labels.first().map_or(0, |label| self.columns.get(label).map_or(0, |col| col.len()))
     }
 
+    /// Returns the number of columns in the DataFrame
     pub fn num_cols(&self) -> usize {
         self.labels.len()
     }
 
+    /// Reads data from a CSV file and creates a DataFrame
+    /// 
+    /// # Arguments
+    /// * `path` - Path to the CSV file
+    /// * `col_types` - HashMap specifying the expected type for each column
+    /// 
+    /// # Returns
+    /// * `Ok(DataFrame)` if successful
+    /// * `Err` with error details if the operation failed
     pub fn read_csv<P: AsRef<Path>>(
         path: P,
         col_types: &HashMap<String, ValueType> // Expect types: Map Label -> Type
@@ -226,11 +274,10 @@ impl DataFrame {
             let values: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
 
             if values.len() != labels.len() {
-                return Err(Error::Csv(csv::Error::from(csv::ErrorKind::UnequalLengths {
-                    pos: None, // We don't have precise position info here
-                    expected_len: labels.len() as u64,
-                    len: values.len() as u64,
-                })));
+                return Err(Error::DimensionMismatch(format!(
+                    "CSV row has {} columns, expected {} columns based on header",
+                    values.len(), labels.len()
+                )));
             }
 
             for (i, label) in labels.iter().enumerate() {
@@ -250,6 +297,15 @@ impl DataFrame {
         new_dataframe(labels, data)
     }
 
+    /// Adds a new column to the DataFrame
+    /// 
+    /// # Arguments
+    /// * `label` - Label for the new column
+    /// * `data` - Vector of values for the new column
+    /// 
+    /// # Returns
+    /// * `Ok(DataFrame)` with the new DataFrame if successful
+    /// * `Err` if the column already exists or lengths don't match
     pub fn add_column(&self, label: String, data: Vec<Value>) -> Result<DataFrame, Error> {
         if self.columns.contains_key(&label) {
             return Err(Error::InvalidOperation(format!("Column '{}' already exists", label)));
@@ -296,6 +352,14 @@ impl DataFrame {
         Ok(DataFrame { columns: new_columns, labels: new_labels })
     }
 
+    /// Merges two DataFrames
+    /// 
+    /// # Arguments
+    /// * `other` - The DataFrame to merge with
+    /// 
+    /// # Returns
+    /// * `Ok(DataFrame)` with the merged DataFrame if successful
+    /// * `Err` if the columns don't match or have different types
     pub fn merge_frame(&self, other: &DataFrame) -> Result<DataFrame, Error> {
         if self.labels.len() != other.labels.len() {
             return Err(Error::DimensionMismatch("DataFrames have different number of columns".to_string()));
@@ -328,7 +392,15 @@ impl DataFrame {
         })
     }
 
-     pub fn restrict_columns(&self, keep_labels: &[String]) -> Result<DataFrame, Error> {
+    /// Creates a new DataFrame with only the specified columns
+    /// 
+    /// # Arguments
+    /// * `keep_labels` - Vector of column labels to include
+    /// 
+    /// # Returns
+    /// * `Ok(DataFrame)` with the restricted DataFrame if successful
+    /// * `Err` if any column is not found
+    pub fn restrict_columns(&self, keep_labels: &[String]) -> Result<DataFrame, Error> {
         let mut new_columns = HashMap::new();
         let mut new_labels = Vec::new();
 
@@ -351,6 +423,15 @@ impl DataFrame {
         Ok(DataFrame { columns: new_columns, labels: new_labels })
     }
 
+    /// Filters the DataFrame rows based on a condition
+    /// 
+    /// # Arguments
+    /// * `column_label` - Column label to apply the filter on
+    /// * `predicate` - Function that returns true for rows to keep
+    /// 
+    /// # Returns
+    /// * `Ok(DataFrame)` with the filtered DataFrame if successful
+    /// * `Err` if the column is not found
     pub fn filter<F>(&self, column_label: &str, predicate: F) -> Result<DataFrame, Error>
     where
         F: Fn(&Value) -> bool,
@@ -358,7 +439,7 @@ impl DataFrame {
         let target_col = self.columns.get(column_label)
             .ok_or_else(|| Error::ColumnNotFound(column_label.to_string()))?;
 
-        let num_rows = self.num_rows();
+        let _num_rows = self.num_rows();
         let mut keep_indices = Vec::new();
         for (i, value) in target_col.data.iter().enumerate() {
             if predicate(value) {
@@ -381,6 +462,15 @@ impl DataFrame {
         new_dataframe(self.labels.clone(), new_data)
     }
 
+    /// Applies an operation to columns and returns the result
+    /// 
+    /// # Arguments
+    /// * `column_labels` - Column labels to operate on
+    /// * `operation` - Function to apply to the columns
+    /// 
+    /// # Returns
+    /// * `Ok(T)` with the operation result if successful
+    /// * `Err` if any column is not found
    pub fn column_op<F, T>(&self, column_labels: &[String], operation: F) -> Result<T, Error>
     where
         F: Fn(&[&Column]) -> Result<T, Error>, // Closure takes slice of Column references
@@ -397,6 +487,14 @@ impl DataFrame {
 
     // --- Methods using column_op ---
 
+    /// Calculates the median of a numerical column
+    /// 
+    /// # Arguments
+    /// * `column_label` - Column label to calculate median for
+    /// 
+    /// # Returns
+    /// * `Ok(Value)` with the median if successful
+    /// * `Err` if the column is not found or not numerical
     pub fn median(&self, column_label: &str) -> Result<Value, Error> {
         self.column_op(&[column_label.to_string()], |cols| {
             let col = cols[0];
@@ -432,8 +530,15 @@ impl DataFrame {
         })
     }
 
-    // Note: sub_columns doesn't fit the `column_op` signature cleanly if we want
-    // column_op to return a single value T. Implementing it directly.
+    /// Performs subtraction between two numerical columns
+    /// 
+    /// # Arguments
+    /// * `label1` - First column label (minuend)
+    /// * `label2` - Second column label (subtrahend)
+    /// 
+    /// # Returns
+    /// * `Ok(Vec<Value>)` with the subtraction results if successful
+    /// * `Err` if any column is not found or types are incompatible
     pub fn sub_columns(&self, label1: &str, label2: &str) -> Result<Vec<Value>, Error> {
         self.column_op(&[label1.to_string(), label2.to_string()], |cols| {
             let col1 = cols[0];
